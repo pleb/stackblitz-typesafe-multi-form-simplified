@@ -5,34 +5,43 @@ import { z } from 'zod'
 import { withZod } from '@remix-validated-form/with-zod'
 import { dispatch } from '~/utilities/dispatcher'
 import { ValidatedForm } from 'remix-validated-form'
-import { useCallback, useState } from 'react'
+import {useCallback, useEffect, useState} from "react"
 import { randomDelayBetween } from '~/utilities/delay'
 import { GlassButton } from '~/components/molecules/GlassButton'
 import { Title } from '~/components/atoms/Title'
 import { GlassPanel } from '~/components/molecules/GlassPanel'
-import {
-  completeTodoItemValidationSchema,
-  deleteTodoItemValidationSchema,
-  TodoItem,
-} from '~/components/organisms/TodoItem'
 import { Panel } from '~/components/atoms/Panel'
-import {
-  UpsertTodo,
-  upsertTodoValidationSchema,
-} from '~/components/organisms/UpsertTodo'
 import { useLoadingContext } from '~/contexts/loadingContext'
 import Loading from 'icon/LoadingIndicator'
 import { useValidatorFields } from '~/hooks/useFields'
 import { useDispatchActions } from '~/hooks/useDispatchActions'
+import {ValidatedCheckboxInput, ValidatedHiddenInput, ValidatedTextInput} from "~/components/atoms/ValidatedInput"
+import {cn} from "~/utilities/cn"
+import {IconButton} from "~/components/molecules/IconButton"
+import Delete from "../../icon/Delete"
+import Edit from "../../icon/Edit"
+import {Button} from "~/components/atoms/Button"
+import {useFocus} from "~/hooks/useFocus"
+import {zfd} from "zod-form-data"
 
 const validator = withZod(
   z.discriminatedUnion('_action', [
     z.object({
       _action: z.literal('reset'),
     }),
-    upsertTodoValidationSchema,
-    deleteTodoItemValidationSchema,
-    completeTodoItemValidationSchema,
+    z.object({
+      _action: z.literal('upsert'),
+      description: z.string().min(2).max(50),
+      id: zfd.numeric(z.number().optional()),
+    }),
+    z.object({
+      _action: z.literal('delete'),
+      id: zfd.numeric(),
+    }),
+    z.object({
+      _action: z.literal('complete'),
+      id: zfd.numeric(),
+    }),
   ]),
 )
 
@@ -68,11 +77,15 @@ type Todo = Awaited<ReturnType<typeof loader>>[number]
 
 export default function Index() {
   const todos = useLoaderData<typeof loader>()
-  const [edit, setEdit] = useState<Todo>()
-  const clearEdit = useCallback(() => setEdit(undefined), [setEdit])
+  const [editTodo, setEditTodo] = useState<Todo>()
+  const clearEdit = useCallback(() => setEditTodo(undefined), [setEditTodo])
   const loadingContext = useLoadingContext()
   const fields = useValidatorFields(validator)
   const dispatchActions = useDispatchActions(validator)
+  const [inputRef, setInputFocus] = useFocus<HTMLInputElement>()
+  useEffect(() => {
+    setInputFocus()
+  }, [editTodo])
 
   return (
     <div
@@ -99,23 +112,82 @@ export default function Index() {
           hidden={!loadingContext.isLoading}
         />
         <Panel className='mt-2 px-4' aria-live='polite'>
-          {todos.map((td, i) => (
-            <TodoItem
-              key={`todo-${td.id}`}
-              todo={td}
-              onEdit={setEdit}
-              disableActions={Boolean(edit)}
-              disabled={loadingContext.isLoading}
-            />
+          {todos.map((todo) => (
+            <ValidatedForm validator={validator} method='post' key={todo.id}>
+              <ValidatedHiddenInput name={fields.id} value={todo.id.toString()} />
+              <Panel
+                border='b'
+                className={cn('p-3', 'hover:bg-glass/20', 'grid grid-flow-col')}
+              >
+                <div
+                  aria-label={`To-do entry ${todo.description}`}
+                  aria-flowto={`delete-${todo.id}`}
+                >
+                  {todo.description}
+                </div>
+                {!Boolean(editTodo) && (
+                  <div className='w-30 justify-self-end grid gap-2 grid-flow-col content-center'>
+                    <IconButton
+                      id={`delete-${todo.id}`}
+                      color='Red'
+                      type='submit'
+                      name={fields._action}
+                      value={dispatchActions.delete}
+                      disabled={loadingContext.isLoading}
+                      aria-label='Delete to-do entry'
+                    >
+                      <Delete aria-hidden={true} />
+                    </IconButton>
+                    <IconButton
+                      color='Green'
+                      onClick={() => setEditTodo(todo)}
+                      disabled={loadingContext.isLoading}
+                      aria-label='Edit to-do entry'
+                    >
+                      <Edit aria-hidden={true} />
+                    </IconButton>
+                    <ValidatedCheckboxInput
+                      className='ml-2'
+                      name={fields._action}
+                      label='Complete to-do entry'
+                      value={dispatchActions.complete}
+                      submitOnChange={true}
+                      disabled={loadingContext.isLoading}
+                    />
+                  </div>
+                )}
+              </Panel>
+            </ValidatedForm>
           ))}
         </Panel>
-        <UpsertTodo
-          todo={edit}
-          onSubmit={() => {
-            setTimeout(clearEdit)
-          }}
-          disabled={loadingContext.isLoading}
-        />
+        <ValidatedForm
+          validator={validator}
+          onSubmit={() => { setTimeout(clearEdit) }}
+          resetAfterSubmit={true}
+          method='post'
+        >
+          <ValidatedHiddenInput name={fields.id} value={editTodo?.id.toString()} />
+          <div className='mt-2 py-3 px-4 grid grid-flow-col auto-cols-[1fr_200px] gap-2 items-start'>
+            <ValidatedTextInput
+              ref={inputRef}
+              className='p-2 border'
+              label='To-do description'
+              placeholder='Todo description'
+              name={fields.description}
+              value={editTodo?.description}
+              disabled={loadingContext.isLoading}
+            />
+            <Button
+              className='text-black'
+              type='submit'
+              name={fields._action}
+              value={dispatchActions.upsert}
+              disabled={loadingContext.isLoading}
+            >
+              {editTodo ? 'Edit' : 'Add'}
+            </Button>
+          </div>
+        </ValidatedForm>
       </GlassPanel>
     </div>
   )
